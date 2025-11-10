@@ -28,6 +28,9 @@ static const Rule rules[] = {
 	{ "firefox_EXAMPLE",  NULL,       1 << 8,       0,           -1 }, /* Start on ONLY tag "9" */
 };
 
+/* adaptive sync */
+static int global_adaptive = 0;
+
 /* layout(s) */
 static const Layout layouts[] = {
 	/* symbol     arrange function */

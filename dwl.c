@@ -206,6 +206,7 @@ struct Monitor {
 	float mfact;
 	int gamma_lut_changed;
 	int nmaster;
+	int fullscreen_adaptive;
 	char ltsymbol[16];
 	int asleep;
 };
@@ -327,6 +328,7 @@ static void requeststartdrag(struct wl_listener *listener, void *data);
 static void requestmonstate(struct wl_listener *listener, void *data);
 static void resize(Client *c, struct wlr_box geo, int interact);
 static void run(char *startup_cmd);
+static void setadaptivesync(struct Monitor *m, int enable);
 static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
 static void setfloating(Client *c, int floating);
@@ -1004,13 +1006,12 @@ createmon(struct wl_listener *listener, void *data)
 			m->m.y = r->y;
 			m->mfact = r->mfact;
 			m->nmaster = r->nmaster;
+			m->fullscreen_adaptive = r->adaptive;
 			m->lt[0] = r->lt;
 			m->lt[1] = &layouts[LENGTH(layouts) > 1 && r->lt != &layouts[1]];
 			strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
 			wlr_output_state_set_scale(&state, r->scale);
 			wlr_output_state_set_transform(&state, r->rr);
-
-			wlr_output_state_set_adaptive_sync_enabled(&state, r->adaptive);
 
 			if(r->mode == -1)
 				wlr_output_state_set_custom_mode(&state, r->resx, r->resy,
@@ -2282,6 +2283,32 @@ run(char *startup_cmd)
 	wl_display_run(dpy);
 }
 
+static void
+setadaptivesync(struct Monitor *m, int enable)
+{
+	struct wlr_output_state state;
+	struct wlr_output_configuration_v1 *config;
+	struct wlr_output_configuration_head_v1 *config_head;
+
+	if (!m || !m->fullscreen_adaptive || !m->wlr_output || !m->wlr_output->enabled)
+		return;
+
+	config = wlr_output_configuration_v1_create();
+	config_head = wlr_output_configuration_head_v1_create(config, m->wlr_output);
+	if (config_head->state.adaptive_sync_enabled == enable)
+		return;
+
+	/* Set and commit the adaptive sync state change */
+	wlr_output_state_init(&state);
+	wlr_output_state_set_adaptive_sync_enabled(&state, enable);
+	wlr_output_commit_state(m->wlr_output, &state);
+	wlr_output_state_finish(&state);
+
+	/* Broadcast the adaptive sync state change to output_mgr */
+	config_head->state.adaptive_sync_enabled = enable;
+	wlr_output_manager_v1_set_configuration(output_mgr, config);
+}
+
 void
 setcursor(struct wl_listener *listener, void *data)
 {
@@ -2345,10 +2372,14 @@ setfullscreen(Client *c, int fullscreen)
 	if (fullscreen) {
 		c->prev = c->geom;
 		resize(c, c->mon->m, 0);
+		if (global_adaptive)
+			setadaptivesync(c->mon, 1);
 	} else {
 		/* restore previous size instead of arrange for floating windows since
 		 * client positions are set by the user and cannot be recalculated */
 		resize(c, c->prev, 0);
+		if (global_adaptive)
+			setadaptivesync(c->mon, 0);
 	}
 	arrange(c->mon);
 	printstatus();
