@@ -27,6 +27,9 @@ static const Rule rules[] = {
     /* default/example rule: can be changed but cannot be eliminated; at least one rule must exist */
 };
 
+/* adaptive sync */
+static int global_adaptive = 0;
+
 /* layout(s) */
 static const Layout layouts[] = {
 	/* symbol     arrange function */
