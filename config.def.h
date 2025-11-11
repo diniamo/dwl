@@ -36,6 +36,15 @@ static const Rule rules[] = {
 	{ "firefox_EXAMPLE",  NULL,       1 << 8,       0,           -1 }, /* Start on ONLY tag "9" */
 };
 
+/* tearing */
+static int tearing_allowed = 1;
+static int global_tearing = 0;
+static const ForceTearingRule force_tearing_whitelist[] = {
+	{.title = "", .appid = "hl_linux"},
+	{.title = "Warcraft III", .appid = ""},
+	{.title = "", .appid = "gamescope"},
+};
+
 /* adaptive sync */
 static int global_adaptive = 0;
 
@@ -139,6 +148,7 @@ static const char *menucmd[] = { "wmenu-run", NULL };
 static const Key keys[] = {
 	/* Note that Shift changes certain key codes: c -> C, 2 -> at, etc. */
 	/* modifier                  key                 function        argument */
+	{ MODKEY|WLR_MODIFIER_CTRL,  XKB_KEY_t,          toggleglobaltearing, {0} },
 	{ MODKEY,                    XKB_KEY_p,          spawn,          {.v = menucmd} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_Return,     spawn,          {.v = termcmd} },
 	{ MODKEY,                    XKB_KEY_j,          focusstack,     {.i = +1} },
