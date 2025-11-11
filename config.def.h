@@ -37,13 +37,7 @@ static const Rule rules[] = {
 };
 
 /* tearing */
-static int tearing_allowed = 1;
 static int global_tearing = 0;
-static const ForceTearingRule force_tearing_whitelist[] = {
-	{.title = "", .appid = "hl_linux"},
-	{.title = "Warcraft III", .appid = ""},
-	{.title = "", .appid = "gamescope"},
-};
 
 /* adaptive sync */
 static int global_adaptive = 0;

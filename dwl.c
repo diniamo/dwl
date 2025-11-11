@@ -90,11 +90,6 @@ enum { NetWMWindowTypeDialog, NetWMWindowTypeSplash, NetWMWindowTypeToolbar,
 	NetWMWindowTypeUtility, NetLast }; /* EWMH atoms */
 #endif
 
-typedef struct ForceTearingRule {
-	const char* title;
-	const char* appid;
-} ForceTearingRule;
-
 typedef union {
 	int i;
 	uint32_t ui;
@@ -318,7 +313,6 @@ static void focusclient(Client *c, int lift);
 static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
 static Client *focustop(Monitor *m);
-static void forcetearingrule(Client *c);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
 static void handlesig(int signo);
@@ -1522,35 +1516,6 @@ focustop(Monitor *m)
 	return NULL;
 }
 
-static void
-forcetearingrule(Client *c)
-{
-	int success = 0;
-	const char* appid = client_get_appid(c);
-	const char* title = client_get_title(c);
-
-	for (unsigned i = 0; i < LENGTH(force_tearing_whitelist); ++i) {
-		if (appid) {
-			if (strcmp(force_tearing_whitelist[i].appid, appid) == 0) {
-				success = 1;
-				break;
-			}
-		}
-
-		if (title) {
-			if (strcmp(force_tearing_whitelist[i].title, title) == 0) {
-				success = 1;
-				break;
-			}
-		}
-	}
-
-	if (success) {
-		c->tearing_hint = WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC;
-		fprintf(stderr, "Forcing tearing for appid: '%s', title: '%s'\n", appid, title);
-	}
-}
-
 void
 fullscreennotify(struct wl_listener *listener, void *data)
 {
@@ -1778,8 +1743,6 @@ mapnotify(struct wl_listener *listener, void *data)
 	Client *w, *c = wl_container_of(listener, c, map);
 	Monitor *m;
 	int i;
-
-	forcetearingrule(c);
 
 	/* Create scene tree for this client and its border */
 	c->scene = client_surface(c)->data = wlr_scene_tree_create(layers[LyrTile]);
@@ -2021,7 +1984,7 @@ int
 moncantear(Monitor* m)
 {
 	Client *c = focustop(m);
-	return (c && c->isfullscreen && c->tearing_hint); /* 1 == ASYNC */
+	return (c && c->isfullscreen);
 }
 
 void
@@ -2228,7 +2191,7 @@ rendermon(struct wl_listener *listener, void *data)
 		}
 	}
 
-	if (global_tearing || (tearing_allowed && moncantear(m))) {
+	if (global_tearing && moncantear(m)) {
 		pending.tearing_page_flip = true;
 
 		if (!wlr_output_test_state(m->wlr_output, &pending)) {
