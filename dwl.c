@@ -229,6 +229,11 @@ typedef struct {
 } MonitorRule;
 
 typedef struct {
+	struct wl_list link;
+	struct libinput_device *device;
+} Pointer;
+
+typedef struct {
 	struct wlr_pointer_constraint_v1 *constraint;
 	struct wl_listener destroy;
 } PointerConstraint;
@@ -314,6 +319,7 @@ static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
 static Client *focustop(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
+static void gamemode(int enable);
 static void gpureset(struct wl_listener *listener, void *data);
 static void handlesig(int signo);
 static void incnmaster(const Arg *arg);
@@ -420,6 +426,7 @@ static struct wlr_virtual_pointer_manager_v1 *virtual_pointer_mgr;
 static struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
 static struct wlr_output_power_manager_v1 *power_mgr;
 
+static struct wl_list scroll_pointers;
 static struct wlr_pointer_constraints_v1 *pointer_constraints;
 static struct wlr_relative_pointer_manager_v1 *relative_pointer_mgr;
 static struct wlr_pointer_constraint_v1 *active_constraint;
@@ -1128,6 +1135,8 @@ void
 createpointer(struct wlr_pointer *pointer)
 {
 	struct libinput_device *device;
+	Pointer *scroll_pointer;
+
 	if (wlr_input_device_is_libinput(&pointer->base)
 			&& (device = wlr_libinput_get_device_handle(&pointer->base))) {
 
@@ -1150,8 +1159,13 @@ createpointer(struct wlr_pointer *pointer)
 		if (libinput_device_config_middle_emulation_is_available(device))
 			libinput_device_config_middle_emulation_set_enabled(device, middle_button_emulation);
 
-		if (libinput_device_config_scroll_get_methods(device) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL)
+		if (libinput_device_config_scroll_get_methods(device) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL) {
 			libinput_device_config_scroll_set_method (device, scroll_method);
+
+			scroll_pointer = ecalloc(1, sizeof(*scroll_pointer));
+			scroll_pointer->device = device;
+			wl_list_insert(&scroll_pointers, &scroll_pointer->link);
+		}
 
 		if (libinput_device_config_click_get_methods(device) != LIBINPUT_CONFIG_CLICK_METHOD_NONE)
 			libinput_device_config_click_set_method (device, click_method);
@@ -1524,6 +1538,28 @@ fullscreennotify(struct wl_listener *listener, void *data)
 }
 
 void
+gamemode(int enable)
+{
+	Pointer *pointer;
+	Monitor *m;
+	Client *c;
+	int new_scroll_method = enable ? LIBINPUT_CONFIG_SCROLL_NO_SCROLL : scroll_method;
+
+	wl_list_for_each(pointer, &scroll_pointers, link) {
+		libinput_device_config_scroll_set_method(pointer->device, new_scroll_method);
+	}
+
+	global_adaptive = enable;
+	wl_list_for_each(m, &mons, link) {
+		c = focustop(m);
+		if (c && c->isfullscreen)
+			setadaptivesync(m, enable);
+	}
+
+	global_tearing = enable;
+}
+
+void
 gpureset(struct wl_listener *listener, void *data)
 {
 	struct wlr_renderer *old_drw = drw;
@@ -1550,7 +1586,13 @@ gpureset(struct wl_listener *listener, void *data)
 void
 handlesig(int signo)
 {
-	if (signo == SIGCHLD) {
+	if (signo == SIGPWR) {
+
+	} else if (signo == SIGUSR1) {
+		gamemode(1);
+	} else if (signo == SIGUSR2) {
+		gamemode(0);
+	} else if (signo == SIGCHLD) {
 #ifdef XWAYLAND
 		siginfo_t in;
 		/* wlroots expects to reap the XWayland process itself, so we
@@ -2372,8 +2414,6 @@ setadaptivesync(struct Monitor *m, int enable)
 
 	config = wlr_output_configuration_v1_create();
 	config_head = wlr_output_configuration_head_v1_create(config, m->wlr_output);
-	if (config_head->state.adaptive_sync_enabled == enable)
-		return;
 
 	/* Set and commit the adaptive sync state change */
 	wlr_output_state_init(&state);
@@ -2568,7 +2608,7 @@ setsel(struct wl_listener *listener, void *data)
 void
 setup(void)
 {
-	int i, sig[] = {SIGCHLD, SIGINT, SIGTERM, SIGPIPE};
+	int i, sig[] = {SIGCHLD, SIGINT, SIGTERM, SIGPIPE, SIGUSR1, SIGUSR2, SIGPWR};
 	struct sigaction sa = {.sa_flags = SA_RESTART, .sa_handler = handlesig};
 	sigemptyset(&sa.sa_mask);
 
@@ -2699,6 +2739,8 @@ setup(void)
 			WLR_SERVER_DECORATION_MANAGER_MODE_SERVER);
 	xdg_decoration_mgr = wlr_xdg_decoration_manager_v1_create(dpy);
 	LISTEN_STATIC(&xdg_decoration_mgr->events.new_toplevel_decoration, createdecoration);
+
+	wl_list_init(&scroll_pointers);
 
 	pointer_constraints = wlr_pointer_constraints_v1_create(dpy);
 	LISTEN_STATIC(&pointer_constraints->events.new_constraint, createpointerconstraint);
