@@ -2334,8 +2334,8 @@ run(char *startup_cmd)
 		/* First: import environment variables */
 		pid_t import_pid = fork();
 		if (import_pid == 0) {
-			execvp("systemctl", (char *const[]) {
-				"systemctl", "--user", "import-environment",
+			execvp("dbus-update-activation-environment", (char *const[]) {
+				"dbus-update-activation-environment", "--systemd",
 				"DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", NULL
 			});
 			exit(1);
