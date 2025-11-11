@@ -1884,6 +1884,10 @@ mapnotify(struct wl_listener *listener, void *data)
 	 * If there is no parent, apply rules */
 	if ((p = client_get_parent(c))) {
 		c->isfloating = 1;
+		if (p->mon) {
+			c->geom.x = (p->mon->w.width - c->geom.width) / 2 + p->mon->m.x;
+			c->geom.y = (p->mon->w.height - c->geom.height) / 2 + p->mon->m.y;
+		}
 		setmon(c, p->mon, p->tags);
 	} else {
 		applyrules(c);
