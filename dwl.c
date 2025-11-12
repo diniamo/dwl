@@ -2181,8 +2181,10 @@ printstatus(void)
 			if (c->mon != m)
 				continue;
 			occ |= c->tags;
-			if (c->isurgent)
-				urg |= c->tags;
+			if (c->isurgent) {
+				view(&((Arg){ .ui = c->tags }));
+				focusclient(c, 1);
+			}
 		}
 		if ((c = focustop(m))) {
 			title = client_get_title(c);
