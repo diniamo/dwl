@@ -2228,8 +2228,10 @@ printstatus(void)
 			if (c->mon != m)
 				continue;
 			occ |= c->tags;
-			if (c->isurgent)
-				urg |= c->tags;
+			if (c->isurgent) {
+				view(&((Arg){ .ui = c->tags }));
+				focusclient(c, 1);
+			}
 		}
 		if ((c = focustop(m))) {
 			printf("%s title %s\n", m->wlr_output->name, client_get_title(c));
