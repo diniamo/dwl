@@ -372,6 +372,7 @@ static void setpsel(struct wl_listener *listener, void *data);
 static void setsel(struct wl_listener *listener, void *data);
 static void setup(void);
 static void spawn(const Arg *arg);
+static void spawninfo(const Arg *arg);
 static void startdrag(struct wl_listener *listener, void *data);
 static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
@@ -2927,6 +2928,47 @@ spawn(const Arg *arg)
 		execvp(((char **)arg->v)[0], (char **)arg->v);
 		die("dwl: execvp %s failed:", ((char **)arg->v)[0]);
 	}
+}
+
+void
+spawninfo(const Arg *arg)
+{
+	int fds[2];
+	Client *c;
+	struct wlr_box g;
+
+	if (pipe(fds) < 0)
+		return;
+
+	if (fork() == 0) {
+		setrlimit(RLIMIT_CORE, &oldrlimit);
+		dup2(fds[0], STDIN_FILENO);
+		close(fds[0]);
+		close(fds[1]);
+		dup2(STDERR_FILENO, STDOUT_FILENO);
+		setsid();
+		execvp(((char **)arg->v)[0], (char **)arg->v);
+		die("dwl: execvp %s failed:", ((char **)arg->v)[0]);
+	}
+
+	close(fds[0]);
+
+	c = focustop(selmon);
+	if (c) {
+		g.x = c->geom.x + c->bw;
+		g.y = c->geom.y + c->bw;
+		g.width = c->geom.width - 2 * c->bw;
+		g.height = c->geom.height - 2 * c->bw;
+	} else {
+		g = (struct wlr_box){0};
+	}
+
+	dprintf(fds[1], "%s\n%d %d %d %d\n",
+		selmon->wlr_output->name,
+		g.x, g.y, g.width, g.height
+	);
+
+	close(fds[1]);
 }
 
 void
