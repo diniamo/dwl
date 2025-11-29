@@ -2248,6 +2248,7 @@ pointerfocus(Client *c, struct wlr_surface *surface, double sx, double sy,
 void
 printstatus(void)
 {
+#ifdef PRINT_STATUS
 	Monitor *m = NULL;
 	Client *c;
 	uint32_t occ, urg, sel;
@@ -2286,6 +2287,7 @@ printstatus(void)
 		printf("%s layout %s\n", m->wlr_output->name, m->ltsymbol);
 	}
 	fflush(stdout);
+#endif PRINT_STATUS
 }
 
 void
