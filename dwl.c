@@ -24,6 +24,7 @@
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_drm.h>
+#include <wlr/types/wlr_drm_lease_v1.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
@@ -363,6 +364,7 @@ static void powermgrsetmode(struct wl_listener *listener, void *data);
 static void quit(const Arg *arg);
 static void rendermon(struct wl_listener *listener, void *data);
 static void requestdecorationmode(struct wl_listener *listener, void *data);
+static void requestdrmlease(struct wl_listener *listener, void *data);
 static void requeststartdrag(struct wl_listener *listener, void *data);
 static void requestmonstate(struct wl_listener *listener, void *data);
 static void resize(Client *c, struct wlr_box geo, int interact, int draw_borders);
@@ -439,6 +441,7 @@ static struct wl_list clients; /* tiling order */
 static struct wl_list fstack;  /* focus order */
 static struct wlr_idle_notifier_v1 *idle_notifier;
 static struct wlr_idle_inhibit_manager_v1 *idle_inhibit_mgr;
+static struct wlr_drm_lease_v1_manager *drm_lease_manager;
 static struct wlr_layer_shell_v1 *layer_shell;
 static struct wlr_output_manager_v1 *output_mgr;
 static struct wlr_gamma_control_manager_v1 *gamma_control_mgr;
@@ -1073,6 +1076,13 @@ createmon(struct wl_listener *listener, void *data)
 
 	if (!wlr_output_init_render(wlr_output, alloc, drw))
 		return;
+
+	if (wlr_output->non_desktop) {
+		if (drm_lease_manager)
+			wlr_drm_lease_v1_manager_offer_output(drm_lease_manager, wlr_output);
+
+		return;
+	}
 
 	m = wlr_output->data = ecalloc(1, sizeof(*m));
 	m->wlr_output = wlr_output;
@@ -2377,6 +2387,16 @@ requestdecorationmode(struct wl_listener *listener, void *data)
 				WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
 }
 
+static void requestdrmlease(struct wl_listener *listener, void *data) {
+	struct wlr_drm_lease_request_v1 *req = data;
+	struct wlr_drm_lease_v1 *lease = wlr_drm_lease_request_v1_grant(req);
+
+	if (!lease) {
+		fprintf(stderr, "Failed to grant lease request");
+		wlr_drm_lease_request_v1_reject(req);
+	}
+}
+
 void
 requeststartdrag(struct wl_listener *listener, void *data)
 {
@@ -2931,6 +2951,13 @@ setup(void)
 	output_mgr = wlr_output_manager_v1_create(dpy);
 	LISTEN_STATIC(&output_mgr->events.apply, outputmgrapply);
 	LISTEN_STATIC(&output_mgr->events.test, outputmgrtest);
+
+	drm_lease_manager = wlr_drm_lease_v1_manager_create(dpy, backend);
+	if (drm_lease_manager) {
+		LISTEN_STATIC(&drm_lease_manager->events.request, requestdrmlease);
+	} else {
+		fprintf(stderr, "Failed to create wlr_drm_lease_device_v1; VR will not be available\n");
+	}
 
 	tearing_control_v1 = wlr_tearing_control_manager_v1_create(dpy, 1);
 	wl_signal_add(&tearing_control_v1->events.new_object, &tearing_control_new_object);
