@@ -287,6 +287,7 @@ static void arrange(Monitor *m);
 static void arrangelayer(Monitor *m, struct wl_list *list,
 		struct wlr_box *usable_area, int exclusive);
 static void arrangelayers(Monitor *m);
+static void autostartexec(void);
 static void axisnotify(struct wl_listener *listener, void *data);
 static void buttonpress(struct wl_listener *listener, void *data);
 static void chvt(const Arg *arg);
@@ -364,7 +365,7 @@ static void requestdecorationmode(struct wl_listener *listener, void *data);
 static void requeststartdrag(struct wl_listener *listener, void *data);
 static void requestmonstate(struct wl_listener *listener, void *data);
 static void resize(Client *c, struct wlr_box geo, int interact, int draw_borders);
-static void run(char *startup_cmd);
+static void run(void);
 static void sendframedoneiterator(struct wlr_scene_buffer *buffer, int x, int y, void *user_data);
 static void setadaptivesync(struct Monitor *m, int enable);
 static void setcursor(struct wl_listener *listener, void *data);
@@ -413,7 +414,6 @@ static void zoom(const Arg *arg);
 /* variables */
 static struct rlimit oldrlimit;
 static struct rlimit newrlimit;
-static pid_t child_pid = -1;
 static int locked;
 static void *exclusive_focus;
 static struct wl_display *dpy;
@@ -514,6 +514,9 @@ static struct wl_listener new_xwayland_surface = {.notify = createnotifyx11};
 static struct wl_listener xwayland_ready = {.notify = xwaylandready};
 static struct wlr_xwayland *xwayland;
 #endif
+
+static pid_t *autostart_pids;
+static int autostart_len;
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
@@ -679,6 +682,27 @@ arrangelayers(Monitor *m)
 }
 
 void
+autostartexec(void) {
+	const char *const *p;
+	int i = 0;
+
+	/* Count entries */
+	for (p = autostart; *p; autostart_len++, p++)
+		while (*++p);
+
+	autostart_pids = calloc(autostart_len, sizeof(pid_t));
+	for (p = autostart; *p; i++, p++) {
+		if ((autostart_pids[i] = fork()) == 0) {
+			setsid();
+			execvp(*p, (char *const *)p);
+			die("dwl: execvp %s:", *p);
+		}
+		/* Skip arguments */
+		while (*++p);
+	}
+}
+
+void
 axisnotify(struct wl_listener *listener, void *data)
 {
 	/* This event is forwarded by the cursor when a pointer emits an axis event,
@@ -774,16 +798,23 @@ checkidleinhibitor(struct wlr_surface *exclude)
 void
 cleanup(void)
 {
+	int i;
+
 	cleanuplisteners();
+
+	/* Kill child processes */
+	for (i = 0; i < autostart_len; ++i) {
+		if (autostart_pids[i] > 0) {
+			kill(autostart_pids[i], SIGTERM);
+			waitpid(autostart_pids[i], NULL, 0);
+		}
+	}
+
 #ifdef XWAYLAND
 	wlr_xwayland_destroy(xwayland);
 	xwayland = NULL;
 #endif
 	wl_display_destroy_clients(dpy);
-	if (child_pid > 0) {
-		kill(-child_pid, SIGTERM);
-		waitpid(child_pid, NULL, 0);
-	}
 	wlr_xcursor_manager_destroy(cursor_mgr);
 
 	destroykeyboardgroup(&kb_group->destroy, NULL);
@@ -1703,6 +1734,9 @@ gpureset(struct wl_listener *listener, void *data)
 void
 handlesig(int signo)
 {
+	pid_t pid;
+	int i;
+
 	switch (signo) {
 	case SIGUSR1:
 		gamemode(1);
@@ -1711,7 +1745,14 @@ handlesig(int signo)
 		gamemode(0);
 		break;
 	case SIGCHLD:
-		while (waitpid(-1, NULL, WNOHANG) > 0);
+		while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+			for (i = 0; i < autostart_len; ++i) {
+				if (autostart_pids[i] == pid) {
+					autostart_pids[i] = -1;
+					break;
+				}
+			}
+		}
 		break;
 	case SIGINT:
 	case SIGTERM:
@@ -2464,7 +2505,7 @@ resize(Client *c, struct wlr_box geo, int interact, int draw_borders)
 }
 
 void
-run(char *startup_cmd)
+run(void)
 {
 	/* Add a Unix socket to the Wayland display. */
 	const char *socket = wl_display_add_socket_auto(dpy);
@@ -2480,25 +2521,7 @@ run(char *startup_cmd)
 		die("startup: backend_start");
 
 	/* Now that the socket exists and the backend is started, run the startup command */
-	if (startup_cmd) {
-		int piperw[2];
-		if (pipe(piperw) < 0)
-			die("startup: pipe:");
-		if ((child_pid = fork()) < 0)
-			die("startup: fork:");
-		if (child_pid == 0) {
-			setrlimit(RLIMIT_CORE, &oldrlimit);
-			setsid();
-			dup2(piperw[0], STDIN_FILENO);
-			close(piperw[0]);
-			close(piperw[1]);
-			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, NULL);
-			die("startup: execl:");
-		}
-		dup2(piperw[1], STDOUT_FILENO);
-		close(piperw[1]);
-		close(piperw[0]);
-	}
+	autostartexec();
 
 	/* Mark stdout as non-blocking to avoid the startup script
 	 * causing dwl to freeze when a user neither closes stdin
@@ -3765,17 +3788,14 @@ xwaylandready(struct wl_listener *listener, void *data)
 int
 main(int argc, char *argv[])
 {
-	char *startup_cmd = NULL;
 	int c;
 
 	getrlimit(RLIMIT_CORE, &oldrlimit);
 	newrlimit.rlim_cur = newrlimit.rlim_max = oldrlimit.rlim_max;
 	setrlimit(RLIMIT_CORE, &newrlimit);
 
-	while ((c = getopt(argc, argv, "s:hdv")) != -1) {
-		if (c == 's')
-			startup_cmd = optarg;
-		else if (c == 'd')
+	while ((c = getopt(argc, argv, "hdv")) != -1) {
+		if (c == 'd')
 			log_level = WLR_DEBUG;
 		else if (c == 'v')
 			die("dwl " VERSION);
@@ -3789,10 +3809,10 @@ main(int argc, char *argv[])
 	if (!getenv("XDG_RUNTIME_DIR"))
 		die("XDG_RUNTIME_DIR must be set");
 	setup();
-	run(startup_cmd);
+	run();
 	cleanup();
 	return EXIT_SUCCESS;
 
 usage:
-	die("Usage: %s [-v] [-d] [-s startup command]", argv[0]);
+	die("Usage: %s [-v] [-d]", argv[0]);
 }
