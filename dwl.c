@@ -2515,6 +2515,15 @@ run(void)
 	for (size_t i = 0; i < LENGTH(envs); i++)
 		setenv(envs[i].variable, envs[i].value, 1);
 
+	if (fork() == 0) {
+		setsid();
+		execvp("dbus-update-activation-environment", (char *const[]) {
+			"dbus-update-activation-environment",
+			"WAYLAND_DISPLAY", "DISPLAY", "XDG_CURRENT_DESKTOP",
+			NULL
+		});
+	}
+
 	/* Start the backend. This will enumerate outputs and inputs, become the DRM
 	 * master, etc */
 	if (!wlr_backend_start(backend))
